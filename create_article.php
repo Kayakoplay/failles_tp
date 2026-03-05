@@ -7,21 +7,46 @@ if (!isLoggedIn()) {
     exit;
 }
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $title = $_POST['title'];
-    $content = $_POST['content'];
-    $user_id = $_SESSION['user_id'];
-    
-    // FAILLE 16 : Injection SQL - pas de prepared statement
-    $sql = "INSERT INTO articles (user_id, title, content) 
-            VALUES ($user_id, '$title', '$content')";
-    
-    if ($conn->query($sql)) {
-        $_SESSION['message'] = "Article créé avec succès";
-        header("Location: index.php");
-    } else {
-        $_SESSION['error'] = "Erreur : " . $conn->error;
+// CSRF helpers (fallback)
+if (empty($_SESSION['csrf_token'])) {
+    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+}
+if (!function_exists('csrf_token')) {
+    function csrf_token(): string {
+        return $_SESSION['csrf_token'] ?? '';
     }
+}
+if (!function_exists('require_csrf_post')) {
+    function require_csrf_post(): void {
+        $token = $_POST['csrf_token'] ?? '';
+        if (!is_string($token) || !hash_equals($_SESSION['csrf_token'] ?? '', $token)) {
+            http_response_code(403);
+            die('CSRF token invalide');
+        }
+    }
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    require_csrf_post();
+
+    $title = trim((string)($_POST['title'] ?? ''));
+    $content = trim((string)($_POST['content'] ?? ''));
+    $user_id = (int)($_SESSION['user_id'] ?? 0);
+
+    if ($title === '' || $content === '' || $user_id <= 0) {
+        $_SESSION['error'] = 'Tous les champs sont obligatoires.';
+        header('Location: create_article.php');
+        exit;
+    }
+
+    $stmt = $conn->prepare('INSERT INTO articles (user_id, title, content) VALUES (?, ?, ?)');
+    $stmt->bind_param('iss', $user_id, $title, $content);
+
+    $stmt->execute();
+
+    $_SESSION['message'] = "Article créé avec succès";
+    header("Location: index.php");
+    exit;
 }
 ?>
 <!DOCTYPE html>
@@ -49,39 +74,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     </style>
 </head>
 <body>
-    <header>
-        <h1>BlogSecure</h1>
-    </header>
-    
-    <nav>
-        <a href="index.php">Accueil</a>
-        <a href="auth.php?logout=1">Déconnexion</a>
-    </nav>
-    
-    <div class="container">
-        <h2>Créer un nouvel article</h2>
-        
-        <?php 
-        if (isset($_SESSION['error'])) {
-            echo '<div class="error">' . $_SESSION['error'] . '</div>';
-            unset($_SESSION['error']);
-        }
-        ?>
-        
-        <!-- FAILLE 17 : Pas de protection CSRF -->
-        <form method="POST" action="">
-            <div class="form-group">
-                <label for="title">Titre:</label>
-                <input type="text" id="title" name="title" required>
-            </div>
-            
-            <div class="form-group">
-                <label for="content">Contenu:</label>
-                <textarea id="content" name="content" rows="10" required></textarea>
-            </div>
-            
-            <button type="submit">Publier l'article</button>
-        </form>
-    </div>
+<header>
+    <h1>BlogSecure</h1>
+</header>
+
+<nav>
+    <a href="index.php">Accueil</a>
+    <a href="auth.php?logout=1">Déconnexion</a>
+</nav>
+
+<div class="container">
+    <h2>Créer un nouvel article</h2>
+
+    <?php if (!empty($_SESSION['error'])): ?>
+        <div class="error"><?= htmlspecialchars($_SESSION['error'], ENT_QUOTES, 'UTF-8') ?></div>
+        <?php unset($_SESSION['error']); ?>
+    <?php endif; ?>
+
+    <form method="POST" action="">
+        <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrf_token(), ENT_QUOTES, 'UTF-8') ?>">
+
+        <div class="form-group">
+            <label for="title">Titre:</label>
+            <input type="text" id="title" name="title" required>
+        </div>
+
+        <div class="form-group">
+            <label for="content">Contenu:</label>
+            <textarea id="content" name="content" rows="10" required></textarea>
+        </div>
+
+        <button type="submit">Publier l'article</button>
+    </form>
+</div>
 </body>
 </html>
