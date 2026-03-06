@@ -1,40 +1,32 @@
 <?php
-// delete_article.php - Suppression d'un article
 require 'auth.php';
 
-if (!isLoggedIn() || !isset($_GET['id'])) {
-    header("Location: index.php");
+if (!isLoggedIn()) {
+    header('Location: login.php');
     exit;
 }
 
-$article_id = $_GET['id'];
-
-// FAILLE 18 : Injection SQL
-$sql = "SELECT * FROM articles WHERE id = " . $article_id;
-$result = $conn->query($sql);
-
-if (!$result || $result->num_rows === 0) {
-    header("Location: index.php");
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    header('Location: index.php');
     exit;
 }
 
-$article = $result->fetch_assoc();
+require_csrf_post();
 
-// Vérifier que l'utilisateur est bien le propriétaire
-if ($article['user_id'] != $_SESSION['user_id']) {
-    $_SESSION['error'] = "Vous n'avez pas la permission de supprimer cet article";
-    header("Location: index.php");
+$id = $_POST['id'] ?? '';
+if (!ctype_digit((string)$id)) {
+    $_SESSION['error'] = "Article invalide.";
+    header('Location: index.php');
     exit;
 }
 
-// FAILLE 19 : Injection SQL lors de la suppression - et PAS DE CSRF TOKEN
-$sql = "DELETE FROM articles WHERE id = " . $article_id;
+$article_id = (int)$id;
+$user_id = (int)($_SESSION['user_id'] ?? 0);
 
-if ($conn->query($sql)) {
-    $_SESSION['message'] = "Article supprimé avec succès";
-} else {
-    $_SESSION['error'] = "Erreur : " . $conn->error;
-}
+$stmt = $conn->prepare('DELETE FROM articles WHERE id = ? AND user_id = ?');
+$stmt->bind_param('ii', $article_id, $user_id);
+$stmt->execute();
 
-header("Location: index.php");
-?>
+$_SESSION['message'] = 'Article supprimé.';
+header('Location: index.php');
+exit;
