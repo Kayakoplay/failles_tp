@@ -1,25 +1,29 @@
 <?php
-// add_comment.php - Traitement de l'ajout de commentaire
 require 'auth.php';
 
 if (!isLoggedIn() || $_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header("Location: index.php");
+    header('Location: index.php');
     exit;
 }
 
-$article_id = $_POST['article_id'];
-$comment = $_POST['comment'];
-$user_id = $_SESSION['user_id'];
+require_csrf_post();
 
-// FAILLE 15 : Injection SQL - pas de prepared statement
-$sql = "INSERT INTO comments (article_id, user_id, comment) 
-        VALUES ($article_id, $user_id, '$comment')";
+$article_id = $_POST['article_id'] ?? '';
+$comment = trim((string)($_POST['comment'] ?? ''));
+$user_id = (int)($_SESSION['user_id'] ?? 0);
 
-if ($conn->query($sql)) {
-    $_SESSION['message'] = "Commentaire ajouté avec succès";
-} else {
-    $_SESSION['error'] = "Erreur : " . $conn->error;
+if (!ctype_digit((string)$article_id) || $comment === '' || $user_id <= 0) {
+    $_SESSION['error'] = 'Commentaire invalide.';
+    header('Location: index.php');
+    exit;
 }
 
-header("Location: article.php?id=" . $article_id);
-?>
+$article_id_int = (int)$article_id;
+
+$stmt = $conn->prepare('INSERT INTO comments (article_id, user_id, comment) VALUES (?, ?, ?)');
+$stmt->bind_param('iis', $article_id_int, $user_id, $comment);
+$stmt->execute();
+
+$_SESSION['message'] = 'Commentaire ajouté.';
+header('Location: article.php?id=' . $article_id_int);
+exit;
